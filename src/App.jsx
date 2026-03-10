@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 const cp = (text, setCopied, key) => {
   const el = document.createElement("textarea");
@@ -238,19 +238,46 @@ const estadoStyle = { programado: "bg-blue-100 text-blue-700 border-blue-300", p
 const estadoLabel = { programado: "📌 Programado", publicado: "✅ Publicado", pendiente: "⬜ Pendiente" };
 const VISTAS = ["📅 Calendario", "📊 Estrategia", "✅ Ejecución"];
 
+const replaceVars = (text, vars) => {
+  if (!text) return text;
+  return text
+    .replace(/\{ZONA\}/g, vars.zona || "{ZONA}")
+    .replace(/\{METRO\}/g, vars.metro || "{METRO}")
+    .replace(/\{CLINICA\}/g, vars.clinica || "{CLINICA}");
+};
+
 export default function App() {
   const [mes, setMes] = useState("marzo");
   const [vista, setVista] = useState("✅ Ejecución");
   const [selected, setSelected] = useState(null);
-  const [estado, setEstado] = useState({});
-  const [kpis, setKpis] = useState({}); // `${mes}-s${id}` → number
+  const [estado, setEstado] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("gbp-estado") || "{}"); } catch { return {}; }
+  });
+  const [kpis, setKpis] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("gbp-kpis") || "{}"); } catch { return {}; }
+  });
+  const [notas, setNotas] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("gbp-notas") || "{}"); } catch { return {}; }
+  });
+  const [vars, setVars] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("gbp-vars") || '{"zona":"","metro":"","clinica":""}'); } catch { return { zona: "", metro: "", clinica: "" }; }
+  });
   const [copied, setCopied] = useState(null);
   const [filtro, setFiltro] = useState("TODO");
+  const [showVars, setShowVars] = useState(false);
+
+  useEffect(() => { localStorage.setItem("gbp-estado", JSON.stringify(estado)); }, [estado]);
+  useEffect(() => { localStorage.setItem("gbp-kpis", JSON.stringify(kpis)); }, [kpis]);
+  useEffect(() => { localStorage.setItem("gbp-notas", JSON.stringify(notas)); }, [notas]);
+  useEffect(() => { localStorage.setItem("gbp-vars", JSON.stringify(vars)); }, [vars]);
+
+  const rv = (text) => replaceVars(text, vars);
 
   const data = MESES[mes];
   const cambiarMes = (m) => { setMes(m); setSelected(null); setFiltro("TODO"); };
   const toggle = (key) => setSelected(prev => prev === key ? null : key);
   const setEst = (key, val, e) => { e.stopPropagation(); setEstado(prev => ({ ...prev, [key]: val })); };
+  const setNota = (key, val) => setNotas(prev => ({ ...prev, [key]: val }));
 
   const getKpi = (m, sid) => kpis[`${m}-s${sid}`] || 0;
   const setKpi = (m, sid, val) => {
@@ -260,8 +287,19 @@ export default function App() {
   const totalKpi = data.semanas.reduce((acc, s) => acc + getKpi(mes, s.id), 0);
   const pct = Math.min(100, Math.round((totalKpi / data.kpiObjetivo) * 100));
 
-  const filtros = ["TODO", "POST", "GALERÍA", "Vídeo"];
-  const matchFiltro = (d) => filtro === "TODO" || (filtro === "POST" && d.tipo === "POST") || (filtro === "GALERÍA" && d.tipo === "GALERÍA") || (filtro === "Vídeo" && (d.formato === "Vídeo" || d.formato === "Vídeo LOCAL"));
+  const filtros = ["TODO", "POST", "GALERÍA", "Vídeo", "⬜ Pendiente", "📌 Programado", "✅ Publicado"];
+  const matchFiltro = (d, semanaId) => {
+    if (filtro === "TODO") return true;
+    if (filtro === "POST") return d.tipo === "POST";
+    if (filtro === "GALERÍA") return d.tipo === "GALERÍA";
+    if (filtro === "Vídeo") return d.formato === "Vídeo" || d.formato === "Vídeo LOCAL";
+    const key = `${mes}-s${semanaId}-${d.dia}`;
+    const est = estado[key] || "pendiente";
+    if (filtro === "⬜ Pendiente") return d.tipo === "POST" && !d.yaPublicado && est === "pendiente";
+    if (filtro === "📌 Programado") return d.tipo === "POST" && !d.yaPublicado && est === "programado";
+    if (filtro === "✅ Publicado") return d.tipo === "POST" && !d.yaPublicado && est === "publicado";
+    return true;
+  };
 
   const totalPosts = data.semanas.flatMap(s => s.dias).filter(d => d.tipo === "POST" && !d.yaPublicado).length;
   const totalGaleria = data.semanas.flatMap(s => s.dias).filter(d => d.tipo === "GALERÍA" && !d.yaPublicado).length;
@@ -320,10 +358,40 @@ export default function App() {
       {/* HEADER */}
       <div className="bg-white border-b border-gray-200 px-4 py-3 sticky top-0 z-10 shadow-sm">
         <div className="max-w-5xl mx-auto">
-          <div className="mb-3">
-            <h1 className="text-lg font-bold text-gray-800">📅 Calendario GBP — Cleardent 2026</h1>
-            <p className="text-xs text-gray-400">Estrategia de 3 meses · 70 clínicas · SEO local</p>
+          <div className="flex justify-between items-start mb-3">
+            <div>
+              <h1 className="text-lg font-bold text-gray-800">📅 Calendario GBP — Cleardent 2026</h1>
+              <p className="text-xs text-gray-400">Estrategia de 3 meses · 70 clínicas · SEO local</p>
+            </div>
+            <div className="flex gap-1.5 shrink-0 ml-2">
+              <button onClick={() => setShowVars(v => !v)}
+                className={`text-xs px-2.5 py-1.5 rounded-lg border font-medium transition ${showVars ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-gray-600 border-gray-300 hover:border-gray-400"}`}>
+                {vars.zona || vars.clinica ? `🏥 ${vars.clinica || vars.zona}` : "⚙️ Variables"}
+              </button>
+              <button onClick={() => window.print()} className="text-xs px-2.5 py-1.5 rounded-lg border font-medium bg-white text-gray-600 border-gray-300 hover:border-gray-400" title="Imprimir / Guardar PDF">🖨️</button>
+            </div>
           </div>
+          {showVars && (
+            <div className="mb-3 p-3 bg-indigo-50 border border-indigo-200 rounded-xl">
+              <p className="text-xs font-semibold text-indigo-800 mb-2">⚙️ Variables de la clínica — se sustituyen automáticamente en todos los textos</p>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { k: "zona", label: "Zona / Barrio", ph: "ej. Aravaca" },
+                  { k: "metro", label: "Metro / Hito", ph: "ej. Moncloa" },
+                  { k: "clinica", label: "Nombre clínica", ph: "ej. Cleardent Aravaca" },
+                ].map(({ k, label, ph }) => (
+                  <div key={k}>
+                    <label className="text-xs text-indigo-700 font-medium block mb-0.5">{label}</label>
+                    <input value={vars[k]} onChange={e => setVars(v => ({ ...v, [k]: e.target.value }))}
+                      placeholder={ph} className="w-full text-xs border border-indigo-200 rounded px-2 py-1 bg-white focus:outline-none focus:border-indigo-400" />
+                  </div>
+                ))}
+              </div>
+              {(vars.zona || vars.metro || vars.clinica) && (
+                <p className="text-xs text-indigo-600 mt-2">✅ Sustituyendo: <strong>{vars.zona || "{ZONA}"}</strong> · <strong>{vars.metro || "{METRO}"}</strong> · <strong>{vars.clinica || "{CLINICA}"}</strong></p>
+              )}
+            </div>
+          )}
           <div className="flex gap-2 mb-3">
             {Object.entries(MESES).map(([key, m]) => (
               <button key={key} onClick={() => cambiarMes(key)}
@@ -382,7 +450,7 @@ export default function App() {
                               ? <div className="text-xs text-gray-400 italic leading-tight">📷 {d.tema.replace("✅ Publicado en marzo — ","")}</div>
                               : <>
                                   <div className={`text-xs px-1 py-0.5 rounded mb-0.5 font-medium leading-tight ${formatoBadge[d.formato]}`}>{d.formato}</div>
-                                  <div className="text-xs text-gray-600 leading-tight" style={{display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical',overflow:'hidden'}}>{d.tema.replace("✅ Publicado en marzo — ","")}</div>
+                                  <div className="text-xs text-gray-600 leading-tight" style={{display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical',overflow:'hidden'}}>{rv(d.tema).replace("✅ Publicado en marzo — ","")}</div>
                                   <div className={`mt-1 text-xs px-1 rounded border ${estadoStyle[est]}`}>{est === "pendiente" ? "⬜" : est === "programado" ? "📌" : "✅"}</div>
                                 </>
                             }
@@ -406,14 +474,14 @@ export default function App() {
                               </div>
                               <button onClick={() => setSelected(null)} className="text-gray-300 hover:text-gray-600 text-xl leading-none ml-2">×</button>
                             </div>
-                            <p className="font-semibold text-gray-800 mb-3">{d.tema.replace("✅ Publicado en marzo — ","")}</p>
+                            <p className="font-semibold text-gray-800 mb-3">{rv(d.tema).replace("✅ Publicado en marzo — ","")}</p>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                               <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
                                 <p className="text-xs font-semibold text-gray-600 mb-1">{d.tipo === "GALERÍA" ? "📷 Foto para galería GBP" : d.formato.includes("Vídeo") ? "🎬 Especificaciones de montaje" : "📸 Tipo de foto"}</p>
-                                <p className="text-xs text-gray-700 leading-relaxed whitespace-pre-line">{d.foto}</p>
+                                <p className="text-xs text-gray-700 leading-relaxed whitespace-pre-line">{rv(d.foto)}</p>
                                 {d.produccion && (
                                   <div className={`mt-2 rounded p-2 text-xs ${d.formato === "Vídeo LOCAL" ? "bg-yellow-50 text-yellow-800" : "bg-blue-50 text-blue-800"}`}>
-                                    <span className="font-semibold">{d.formato === "Vídeo LOCAL" ? "⚠️" : "🎬"}</span> {d.produccion}
+                                    <span className="font-semibold">{d.formato === "Vídeo LOCAL" ? "⚠️" : "🎬"}</span> {rv(d.produccion)}
                                   </div>
                                 )}
                               </div>
@@ -421,17 +489,26 @@ export default function App() {
                                 ? <div className="bg-amber-50 rounded-lg p-3 border border-amber-200">
                                     <div className="flex justify-between items-center mb-1">
                                       <p className="text-xs font-semibold text-amber-800">🤖 Descripción para herramienta IA</p>
-                                      <button onClick={() => cp(d.descIA, setCopied, `cal-${key}`)}
+                                      <button onClick={() => cp(rv(d.descIA), setCopied, `cal-${key}`)}
                                         className="text-xs bg-amber-200 hover:bg-amber-300 px-2 py-0.5 rounded ml-2 shrink-0">
                                         {copied === `cal-${key}` ? "✅ Copiado" : "Copiar"}
                                       </button>
                                     </div>
-                                    <p className="text-xs text-amber-900 leading-relaxed">{d.descIA}</p>
+                                    <p className="text-xs text-amber-900 leading-relaxed">{rv(d.descIA)}</p>
                                   </div>
                                 : <div className="bg-gray-50 rounded-lg p-3 border border-gray-200 flex items-center justify-center text-xs text-gray-400 italic">
                                     {d.yaPublicado ? "✅ Ya publicado en marzo" : "🗂️ Subir foto a galería GBP"}
                                   </div>
                               }
+                            </div>
+                            <div className="mt-3">
+                              <textarea
+                                value={notas[key] || ""}
+                                onChange={e => setNota(key, e.target.value)}
+                                placeholder="📝 Nota interna..."
+                                className="w-full text-xs border border-gray-200 rounded-lg p-2 resize-none text-gray-600 placeholder-gray-300 focus:outline-none focus:border-gray-400"
+                                rows={2}
+                              />
                             </div>
                             {d.tipo === "POST" && !d.yaPublicado && (
                               <div className="mt-3 flex items-center justify-between flex-wrap gap-2">
@@ -505,7 +582,7 @@ export default function App() {
                     <div className="text-xs text-gray-500 mb-2">{data.embudo.find(e => s.objetivo.includes(e.fase))?.desc || "Contenido estratégico alineado con el mes."}</div>
                     <div className="flex flex-wrap gap-1">
                       {s.dias.filter(d => d.tipo === "POST" && !d.yaPublicado).map((d, i) => (
-                        <span key={i} className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{d.tema.substring(0,38)}{d.tema.length > 38 ? "…" : ""}</span>
+                        <span key={i} className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{rv(d.tema).substring(0,38)}{d.tema.length > 38 ? "…" : ""}</span>
                       ))}
                     </div>
                   </div>
@@ -550,7 +627,7 @@ export default function App() {
             </div>
 
             {data.semanas.map(semana => {
-              const diasFiltrados = semana.dias.filter(matchFiltro);
+              const diasFiltrados = semana.dias.filter(d => matchFiltro(d, semana.id));
               if (diasFiltrados.length === 0) return null;
               return (
                 <div key={semana.id} className="mb-5 rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
@@ -575,10 +652,11 @@ export default function App() {
                             <div className="flex gap-1 flex-wrap justify-end">
                               {isGaleria && <span className="text-xs px-1.5 py-0.5 rounded-full font-medium bg-gray-100 text-gray-500">GAL</span>}
                               <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${formatoBadge[d.formato] || "bg-gray-100 text-gray-600"}`}>{d.formato}</span>
+                              {notas[key] && <span className="text-xs px-1 py-0.5 rounded-full bg-amber-100 text-amber-600 font-medium">📝</span>}
                             </div>
                           </div>
-                          <p className="text-xs font-semibold text-gray-700 mb-1 leading-tight">{d.tema}</p>
-                          <p className="text-xs text-gray-500 leading-snug">{d.foto.includes("•") ? d.foto.split("\n")[0]+"…" : d.foto.length > 65 ? d.foto.substring(0,65)+"…" : d.foto}</p>
+                          <p className="text-xs font-semibold text-gray-700 mb-1 leading-tight">{rv(d.tema)}</p>
+                          <p className="text-xs text-gray-500 leading-snug">{(() => { const t = rv(d.foto); return t.includes("•") ? t.split("\n")[0]+"…" : t.length > 65 ? t.substring(0,65)+"…" : t; })()}</p>
                           {d.cta !== "—" && <p className="text-xs mt-1"><span className="font-medium text-gray-600">CTA:</span> <span className="text-gray-500">{d.cta}</span></p>}
                           {!isGaleria && !d.yaPublicado && (
                             <div className="mt-2 flex gap-1" onClick={e => e.stopPropagation()}>
@@ -594,10 +672,10 @@ export default function App() {
                             <div className="mt-3 space-y-2" onClick={e => e.stopPropagation()}>
                               <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
                                 <p className="text-xs font-semibold text-gray-700 mb-1">{isGaleria ? "📷 Foto para galería GBP" : d.formato.includes("Vídeo") ? "🎬 Especificaciones" : "📸 Tipo de foto"}</p>
-                                <p className="text-xs text-gray-700 leading-relaxed whitespace-pre-line">{d.foto}</p>
+                                <p className="text-xs text-gray-700 leading-relaxed whitespace-pre-line">{rv(d.foto)}</p>
                                 {d.produccion && (
                                   <div className={`mt-2 rounded p-2 text-xs ${d.formato === "Vídeo LOCAL" ? "bg-yellow-50 text-yellow-800" : "bg-blue-50 text-blue-800"}`}>
-                                    <span className="font-semibold">{d.formato === "Vídeo LOCAL" ? "⚠️" : "🎬"}</span> {d.produccion}
+                                    <span className="font-semibold">{d.formato === "Vídeo LOCAL" ? "⚠️" : "🎬"}</span> {rv(d.produccion)}
                                   </div>
                                 )}
                               </div>
@@ -605,14 +683,24 @@ export default function App() {
                                 <div className="bg-amber-50 rounded-lg p-3 border border-amber-200">
                                   <div className="flex justify-between items-center mb-1">
                                     <span className="text-xs font-semibold text-amber-800">🤖 Descripción para herramienta IA</span>
-                                    <button onClick={() => cp(d.descIA, setCopied, key)}
+                                    <button onClick={() => cp(rv(d.descIA), setCopied, key)}
                                       className="text-xs bg-amber-200 hover:bg-amber-300 px-2 py-0.5 rounded ml-2 shrink-0">
                                       {copied === key ? "✅ Copiado" : "Copiar"}
                                     </button>
                                   </div>
-                                  <p className="text-xs text-amber-900 leading-relaxed">{d.descIA}</p>
+                                  <p className="text-xs text-amber-900 leading-relaxed">{rv(d.descIA)}</p>
                                 </div>
                               )}
+                              <div className="rounded-lg border border-gray-200 bg-white p-2">
+                                <p className="text-xs font-semibold text-gray-600 mb-1">📝 Nota interna</p>
+                                <textarea
+                                  value={notas[key] || ""}
+                                  onChange={e => setNota(key, e.target.value)}
+                                  placeholder="Escribe una nota..."
+                                  className="w-full text-xs border border-gray-200 rounded p-1.5 resize-none text-gray-600 placeholder-gray-300 focus:outline-none focus:border-gray-400"
+                                  rows={2}
+                                />
+                              </div>
                               {!d.descIA && !d.produccion && isGaleria && (
                                 <div className="bg-gray-50 rounded-lg p-2 border border-gray-200 text-xs text-gray-500 italic">🗂️ Subir foto a la galería de la ficha GBP.</div>
                               )}
